@@ -1,9 +1,9 @@
 import { Platform } from 'react-native';
 
 import ExpoEsimUtilsModule from './ExpoEsimUtilsModule';
-import type { CellularPlan, EsimCapability } from './ExpoEsimUtils.types';
+import type { CellularPlan, EsimCapability, EsimSetupResult } from './ExpoEsimUtils.types';
 
-export type { CellularPlan, EsimCapability };
+export type { CellularPlan, EsimCapability, EsimSetupResult };
 
 /**
  * Check if the current device supports eSIM.
@@ -86,33 +86,35 @@ export function getActivePlans(): CellularPlan[] {
 }
 
 /**
- * Open the system eSIM setup / management screen.
+ * Install an eSIM profile on the device.
  *
- * - **iOS 17.4+** with activation code: Opens `cellular-setup://` URL for
- *   direct eSIM activation. Falls back to cellular settings if URL isn't supported.
- * - **iOS < 17.4** or no activation code: Opens the cellular data settings page.
- * - **Android 9+**: Opens `EuiccManager.ACTION_MANAGE_EMBEDDED_SUBSCRIPTIONS`.
- *   If an activation code is provided, it's copied to the clipboard.
+ * - **iOS 17.4+**: Opens Apple's Universal Link which takes the user to the native
+ *   eSIM installation screen. No entitlement required. Returns `"settings_opened"`.
+ * - **iOS < 17.4**: Returns `"unsupported"` — show QR code or manual entry as fallback.
+ * - **Android 9+**: Uses `EuiccManager.downloadSubscription()` to trigger eSIM download
+ *   with a system consent dialog. Falls back to opening eSIM settings with the code
+ *   copied to clipboard.
  *
  * The activation code should be in LPA format: `LPA:1$<SMDP_ADDRESS>$<MATCHING_ID>`
  *
- * @param activationCode - Optional eSIM activation code in LPA format.
- * @returns `true` if the setup screen was opened successfully, `false` otherwise.
+ * @param activationCode - eSIM activation code in LPA format.
+ * @returns Result of the installation attempt.
  *
  * @example
  * ```ts
  * import { openEsimSetup } from 'expo-esim-utils';
  *
- * // Open eSIM settings
- * await openEsimSetup();
- *
- * // Open with activation code for direct install (iOS 17.4+)
- * await openEsimSetup('LPA:1$smdp.example.com$MATCHING_ID');
+ * const result = await openEsimSetup('LPA:1$smdp.example.com$MATCHING_ID');
+ * if (result === 'settings_opened') {
+ *   // User was taken to the eSIM install screen
+ * } else if (result === 'unsupported') {
+ *   // Show QR code or manual fallback
+ * }
  * ```
  */
-export async function openEsimSetup(activationCode?: string): Promise<boolean> {
+export async function openEsimSetup(activationCode?: string): Promise<EsimSetupResult> {
   if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
-    return false;
+    return 'fail';
   }
   return ExpoEsimUtilsModule.openEsimSetup(activationCode ?? null);
 }

@@ -19,6 +19,21 @@ export type EsimCapability = {
 /**
  * Information about an active cellular plan on the device.
  */
+/**
+ * Result of an eSIM installation attempt via `openEsimSetup()`.
+ *
+ * - `success`: eSIM profile was added successfully (Android only).
+ * - `fail`: The installation failed (user cancelled or error).
+ * - `unknown`: The result could not be determined.
+ * - `settings_opened`: The native eSIM install screen was opened (iOS 17.4+ Universal Link
+ *   or Android settings). The user completes installation outside the app.
+ * - `unsupported`: Direct install not available on this OS version. Show QR/manual fallback.
+ */
+export type EsimSetupResult = 'success' | 'fail' | 'unknown' | 'settings_opened' | 'unsupported';
+
+/**
+ * Information about an active cellular plan on the device.
+ */
 export type CellularPlan = {
   /** SIM slot identifier */
   slot: string;

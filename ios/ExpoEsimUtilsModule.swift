@@ -1,12 +1,12 @@
 import ExpoModulesCore
 import CoreTelephony
+import UIKit
 
 public class ExpoEsimUtilsModule: Module {
     public func definition() -> ModuleDefinition {
         Name("ExpoEsimUtils")
 
         /// Returns true if the device hardware supports eSIM.
-        /// Uses CTCellularPlanProvisioning.supportsCellularPlan() — no entitlement required.
         Function("isEsimSupported") { () -> Bool in
             guard #available(iOS 12.0, *) else {
                 return false
@@ -35,29 +35,18 @@ public class ExpoEsimUtilsModule: Module {
                 ? "Device supports eSIM via CoreTelephony"
                 : "Device hardware does not support eSIM"
 
-            // Additional carrier info from CTTelephonyNetworkInfo
-            if #available(iOS 12.0, *) {
-                let networkInfo = CTTelephonyNetworkInfo()
-                if let carriers = networkInfo.serviceSubscriberCellularProviders {
-                    var plans: [[String: Any]] = []
-                    for (key, carrier) in carriers {
-                        var plan: [String: Any] = ["slot": key]
-                        if let name = carrier.carrierName {
-                            plan["carrierName"] = name
-                        }
-                        if let mcc = carrier.mobileCountryCode {
-                            plan["mobileCountryCode"] = mcc
-                        }
-                        if let mnc = carrier.mobileNetworkCode {
-                            plan["mobileNetworkCode"] = mnc
-                        }
-                        plan["allowsVOIP"] = carrier.allowsVOIP
-                        plans.append(plan)
-                    }
-                    if !plans.isEmpty {
-                        result["activePlans"] = plans
-                    }
+            let networkInfo = CTTelephonyNetworkInfo()
+            if let carriers = networkInfo.serviceSubscriberCellularProviders {
+                var plans: [[String: Any]] = []
+                for (key, carrier) in carriers {
+                    var plan: [String: Any] = ["slot": key]
+                    if let name = carrier.carrierName { plan["carrierName"] = name }
+                    if let mcc = carrier.mobileCountryCode { plan["mobileCountryCode"] = mcc }
+                    if let mnc = carrier.mobileNetworkCode { plan["mobileNetworkCode"] = mnc }
+                    plan["allowsVOIP"] = carrier.allowsVOIP
+                    plans.append(plan)
                 }
+                if !plans.isEmpty { result["activePlans"] = plans }
             }
 
             return result
@@ -66,69 +55,61 @@ public class ExpoEsimUtilsModule: Module {
         /// Returns a list of active cellular plans on the device.
         Function("getActivePlans") { () -> [[String: Any]] in
             var plans: [[String: Any]] = []
-
-            guard #available(iOS 12.0, *) else {
-                return plans
-            }
+            guard #available(iOS 12.0, *) else { return plans }
 
             let networkInfo = CTTelephonyNetworkInfo()
-            guard let carriers = networkInfo.serviceSubscriberCellularProviders else {
-                return plans
-            }
+            guard let carriers = networkInfo.serviceSubscriberCellularProviders else { return plans }
 
             for (key, carrier) in carriers {
                 var plan: [String: Any] = ["slot": key]
-                if let name = carrier.carrierName {
-                    plan["carrierName"] = name
-                }
-                if let mcc = carrier.mobileCountryCode {
-                    plan["mobileCountryCode"] = mcc
-                }
-                if let mnc = carrier.mobileNetworkCode {
-                    plan["mobileNetworkCode"] = mnc
-                }
-                if let isoCode = carrier.isoCountryCode {
-                    plan["isoCountryCode"] = isoCode
-                }
+                if let name = carrier.carrierName { plan["carrierName"] = name }
+                if let mcc = carrier.mobileCountryCode { plan["mobileCountryCode"] = mcc }
+                if let mnc = carrier.mobileNetworkCode { plan["mobileNetworkCode"] = mnc }
+                if let isoCode = carrier.isoCountryCode { plan["isoCountryCode"] = isoCode }
                 plan["allowsVOIP"] = carrier.allowsVOIP
                 plans.append(plan)
             }
-
             return plans
         }
 
-        /// Opens the device eSIM setup flow.
+        /// Opens the eSIM installation flow.
         ///
-        /// - With an activation code on iOS 17.4+: opens `cellular-setup://` URL for direct install.
-        /// - Without: opens the cellular settings page.
+        /// iOS 17.4+: Uses Apple's Universal Link to open the native eSIM install screen.
+        ///   URL: https://esimsetup.apple.com/esim_qrcode_provisioning?carddata=<LPA_CODE>
+        ///   No entitlement required — works for any app.
         ///
-        /// The activation code should be in LPA format: `LPA:1$<SMDP_ADDRESS>$<MATCHING_ID>`
-        AsyncFunction("openEsimSetup") { (activationCode: String?) -> Bool in
-            // iOS 17.4+ supports the cellular-setup:// URL scheme for direct eSIM activation
-            if #available(iOS 17.4, *), let code = activationCode, !code.isEmpty {
-                let encoded = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
-                if let url = URL(string: "cellular-setup://esim?carddata=\(encoded)") {
-                    let canOpen = await MainActor.run {
-                        UIApplication.shared.canOpenURL(url)
-                    }
-                    if canOpen {
-                        await MainActor.run {
-                            UIApplication.shared.open(url, options: [:], completionHandler: nil)
+        /// iOS < 17.4: Returns "unsupported" so the JS layer can show QR/manual fallback.
+        ///
+        /// The activation code should be in LPA format: LPA:1$<SMDP_ADDRESS>$<MATCHING_ID>
+        ///
+        /// Returns: "settings_opened" on success, "unsupported" if iOS < 17.4, "fail" on error.
+        AsyncFunction("openEsimSetup") { (activationCode: String?) -> String in
+            guard let code = activationCode, !code.isEmpty else {
+                return "fail"
+            }
+
+            // iOS 17.4+ — use Apple's Universal Link for eSIM provisioning
+            if #available(iOS 17.4, *) {
+                let encodedCode = code.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? code
+                let urlString = "https://esimsetup.apple.com/esim_qrcode_provisioning?carddata=\(encodedCode)"
+
+                guard let url = URL(string: urlString) else {
+                    return "fail"
+                }
+
+                let opened: Bool = await withCheckedContinuation { continuation in
+                    DispatchQueue.main.async {
+                        UIApplication.shared.open(url, options: [:]) { success in
+                            continuation.resume(returning: success)
                         }
-                        return true
                     }
                 }
+
+                return opened ? "settings_opened" : "fail"
             }
 
-            // Fallback: open the cellular data settings
-            if let settingsUrl = URL(string: "App-prefs:MOBILE_DATA_SETTINGS_ID") {
-                await MainActor.run {
-                    UIApplication.shared.open(settingsUrl, options: [:], completionHandler: nil)
-                }
-                return true
-            }
-
-            return false
+            // iOS < 17.4 — no entitlement-free install method available
+            return "unsupported"
         }
     }
 }
