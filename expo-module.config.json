@@ -1,0 +1,9 @@
+{
+  "platforms": ["ios", "android"],
+  "ios": {
+    "modules": ["ExpoEsimUtilsModule"]
+  },
+  "android": {
+    "modules": ["expo.modules.esimutils.ExpoEsimUtilsModule"]
+  }
+}

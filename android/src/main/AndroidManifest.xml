@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Declare eSIM feature as optional so the app can be installed on non-eSIM devices -->
+    <uses-feature
+        android:name="android.hardware.telephony.euicc"
+        android:required="false" />
+</manifest>

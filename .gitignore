@@ -1,0 +1,14 @@
+# Build output
+build/
+
+# Dependencies
+node_modules/
+
+# IDE
+.idea/
+*.xcworkspace
+*.xcodeproj
+
+# OS
+.DS_Store
+Thumbs.db
