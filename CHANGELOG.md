@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.1 (2026-02-18)
+
+### Fixed
+
+- Corrected TypeScript typing for `openEsimSetup` bridge in `ExpoEsimUtilsModule` from `Promise<boolean>` to `Promise<EsimSetupResult>`
+- Aligns native module interface with exported `openEsimSetup()` contract and eliminates downstream app typecheck failures
+
 ## 0.1.0 (2026-02-17)
 
 Initial release.
