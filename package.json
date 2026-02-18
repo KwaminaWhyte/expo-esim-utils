@@ -1,6 +1,6 @@
 {
   "name": "expo-esim-utils",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Native eSIM detection and installation for Expo and React Native. Detect eSIM support, list active plans, and install eSIM profiles via Apple Universal Link (iOS 17.4+) and EuiccManager (Android). No carrier entitlement required.",
   "main": "src/index.ts",
   "types": "src/index.ts",
