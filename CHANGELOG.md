@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.1.3 (2026-03-07)
+
+### Fixed
+
+- Refactored `openEsimSetup` Android implementation to use the `Promise` callback pattern instead of `suspendCoroutine` — `AsyncFunction` lambdas in expo-modules-core 55.x do not run in a suspend context, causing a Kotlin compilation error
+
+## 0.1.2 (2026-03-07)
+
+### Fixed
+
+- Removed explicit `kotlin-stdlib-jdk7` dependency from `android/build.gradle` — `getKotlinVersion()` was removed in newer Android Gradle Plugin versions and the stdlib is included automatically by the Kotlin Gradle plugin (Kotlin 1.8+)
+
 ## 0.1.1 (2026-02-18)
 
 ### Fixed

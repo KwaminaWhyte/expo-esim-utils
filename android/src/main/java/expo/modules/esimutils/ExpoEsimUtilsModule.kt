@@ -10,10 +10,9 @@ import android.telephony.SubscriptionManager
 import android.telephony.euicc.DownloadableSubscription
 import android.telephony.euicc.EuiccInfo
 import android.telephony.euicc.EuiccManager
+import expo.modules.kotlin.Promise
 import expo.modules.kotlin.modules.Module
 import expo.modules.kotlin.modules.ModuleDefinition
-import kotlin.coroutines.resume
-import kotlin.coroutines.suspendCoroutine
 
 class ExpoEsimUtilsModule : Module() {
 
@@ -122,87 +121,87 @@ class ExpoEsimUtilsModule : Module() {
         /// the system eSIM management screen with the code copied to clipboard.
         ///
         /// Returns: "success", "fail", "settings_opened", or "unsupported"
-        AsyncFunction("openEsimSetup") { activationCode: String? ->
+        AsyncFunction("openEsimSetup") { activationCode: String?, promise: Promise ->
             if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
-                return@AsyncFunction "unsupported"
+                promise.resolve("unsupported")
+                return@AsyncFunction
             }
 
             val euiccManager = context.getSystemService(Context.EUICC_SERVICE) as? EuiccManager
             if (euiccManager == null || !euiccManager.isEnabled) {
-                return@AsyncFunction "unsupported"
+                promise.resolve("unsupported")
+                return@AsyncFunction
             }
 
             if (activationCode.isNullOrEmpty()) {
-                return@AsyncFunction "fail"
+                promise.resolve("fail")
+                return@AsyncFunction
             }
 
             // Try downloadSubscription for direct in-app install
             try {
                 val subscription = DownloadableSubscription.forActivationCode(activationCode)
 
-                val result = suspendCoroutine<String> { continuation ->
-                    val callbackIntent = Intent(ACTION_DOWNLOAD_SUBSCRIPTION).apply {
-                        setPackage(context.packageName)
-                    }
+                val callbackIntent = Intent(ACTION_DOWNLOAD_SUBSCRIPTION).apply {
+                    setPackage(context.packageName)
+                }
 
-                    val pendingIntent = PendingIntent.getBroadcast(
-                        context,
-                        0,
-                        callbackIntent,
-                        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
-                    )
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    0,
+                    callbackIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                )
 
-                    val receiver = object : BroadcastReceiver() {
-                        override fun onReceive(ctx: Context?, intent: Intent?) {
-                            context.unregisterReceiver(this)
-                            val resultCode = resultCode
-                            when (resultCode) {
-                                EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_OK -> {
-                                    continuation.resume("success")
-                                }
-                                EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_RESOLVABLE_ERROR -> {
-                                    // Non-carrier app: system shows a user consent dialog
-                                    try {
-                                        val activity = appContext.currentActivity
-                                        if (activity != null && intent != null) {
-                                            euiccManager.startResolutionActivity(
-                                                activity,
-                                                0,
-                                                intent,
-                                                pendingIntent
-                                            )
-                                            continuation.resume("settings_opened")
-                                        } else {
-                                            continuation.resume("fail")
-                                        }
-                                    } catch (_: Exception) {
-                                        continuation.resume("fail")
+                val receiver = object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context?, intent: Intent?) {
+                        context.unregisterReceiver(this)
+                        val resultCode = resultCode
+                        when (resultCode) {
+                            EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_OK -> {
+                                promise.resolve("success")
+                            }
+                            EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_RESOLVABLE_ERROR -> {
+                                // Non-carrier app: system shows a user consent dialog
+                                try {
+                                    val activity = appContext.currentActivity
+                                    if (activity != null && intent != null) {
+                                        euiccManager.startResolutionActivity(
+                                            activity,
+                                            0,
+                                            intent,
+                                            pendingIntent
+                                        )
+                                        promise.resolve("settings_opened")
+                                    } else {
+                                        promise.resolve("fail")
                                     }
+                                } catch (_: Exception) {
+                                    promise.resolve("fail")
                                 }
-                                else -> {
-                                    continuation.resume("fail")
-                                }
+                            }
+                            else -> {
+                                promise.resolve("fail")
                             }
                         }
                     }
-
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                        context.registerReceiver(
-                            receiver,
-                            IntentFilter(ACTION_DOWNLOAD_SUBSCRIPTION),
-                            Context.RECEIVER_NOT_EXPORTED
-                        )
-                    } else {
-                        context.registerReceiver(
-                            receiver,
-                            IntentFilter(ACTION_DOWNLOAD_SUBSCRIPTION)
-                        )
-                    }
-
-                    euiccManager.downloadSubscription(subscription, true, pendingIntent)
                 }
 
-                return@AsyncFunction result
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.registerReceiver(
+                        receiver,
+                        IntentFilter(ACTION_DOWNLOAD_SUBSCRIPTION),
+                        Context.RECEIVER_NOT_EXPORTED
+                    )
+                } else {
+                    context.registerReceiver(
+                        receiver,
+                        IntentFilter(ACTION_DOWNLOAD_SUBSCRIPTION)
+                    )
+                }
+
+                euiccManager.downloadSubscription(subscription, true, pendingIntent)
+                return@AsyncFunction
             } catch (_: Exception) {
                 // downloadSubscription failed — fall back to opening settings with clipboard
             }
@@ -223,9 +222,9 @@ class ExpoEsimUtilsModule : Module() {
                 } else {
                     context.startActivity(intent)
                 }
-                return@AsyncFunction "settings_opened"
+                promise.resolve("settings_opened")
             } catch (_: Exception) {
-                return@AsyncFunction "fail"
+                promise.resolve("fail")
             }
         }
     }
