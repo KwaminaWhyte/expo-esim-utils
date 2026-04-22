@@ -27,9 +27,17 @@ export type EsimCapability = {
  * - `unknown`: The result could not be determined.
  * - `settings_opened`: The native eSIM install screen was opened (iOS 17.4+ Universal Link
  *   or Android settings). The user completes installation outside the app.
+ * - `universal_link_opened`: Android Universal Link handler was launched
+ *   (`https://esimsetup.android.com/...`). The user completes installation in that flow.
  * - `unsupported`: Direct install not available on this OS version. Show QR/manual fallback.
  */
-export type EsimSetupResult = 'success' | 'fail' | 'unknown' | 'settings_opened' | 'unsupported';
+export type EsimSetupResult =
+  | 'success'
+  | 'fail'
+  | 'unknown'
+  | 'settings_opened'
+  | 'universal_link_opened'
+  | 'unsupported';
 
 /**
  * Information about an active cellular plan on the device.

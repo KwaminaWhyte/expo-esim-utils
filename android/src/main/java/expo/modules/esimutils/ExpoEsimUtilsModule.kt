@@ -5,6 +5,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.net.Uri
 import android.os.Build
 import android.telephony.SubscriptionManager
 import android.telephony.euicc.DownloadableSubscription
@@ -181,7 +182,14 @@ class ExpoEsimUtilsModule : Module() {
                                 }
                             }
                             else -> {
-                                promise.resolve("fail")
+                                // Try Android Universal Link before giving up
+                                if (tryOpenUniversalLink(activationCode)) {
+                                    promise.resolve("universal_link_opened")
+                                } else if (openSettingsFallback(activationCode)) {
+                                    promise.resolve("settings_opened")
+                                } else {
+                                    promise.resolve("fail")
+                                }
                             }
                         }
                     }
@@ -203,29 +211,73 @@ class ExpoEsimUtilsModule : Module() {
                 euiccManager.downloadSubscription(subscription, true, pendingIntent)
                 return@AsyncFunction
             } catch (_: Exception) {
-                // downloadSubscription failed — fall back to opening settings with clipboard
+                // downloadSubscription failed — try middle fallback (universal link), then settings
             }
 
-            // Fallback: copy to clipboard and open eSIM management screen
-            try {
-                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
-                clipboard?.setPrimaryClip(
-                    android.content.ClipData.newPlainText("eSIM Activation Code", activationCode)
-                )
+            // Middle fallback: Android Universal Link (API 29+)
+            if (tryOpenUniversalLink(activationCode)) {
+                promise.resolve("universal_link_opened")
+                return@AsyncFunction
+            }
 
-                val intent = Intent(EuiccManager.ACTION_MANAGE_EMBEDDED_SUBSCRIPTIONS)
-                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-
-                val activity = appContext.currentActivity
-                if (activity != null) {
-                    activity.startActivity(intent)
-                } else {
-                    context.startActivity(intent)
-                }
+            // Final fallback: copy to clipboard and open eSIM management screen
+            if (openSettingsFallback(activationCode)) {
                 promise.resolve("settings_opened")
-            } catch (_: Exception) {
+            } else {
                 promise.resolve("fail")
             }
+        }
+    }
+
+    /// Attempts to launch the Android Universal Link for eSIM install.
+    /// Returns true if a handler was found and the activity started successfully.
+    /// Requires Android 10+ (API 29+). On older versions or when no handler exists, returns false.
+    private fun tryOpenUniversalLink(activationCode: String): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) {
+            return false
+        }
+        return try {
+            val encoded = Uri.encode(activationCode)
+            val uri = Uri.parse("https://esimsetup.android.com/esim_qrcode_provisioning?carddata=$encoded")
+            val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            if (intent.resolveActivity(context.packageManager) == null) {
+                return false
+            }
+            val activity = appContext.currentActivity
+            if (activity != null) {
+                activity.startActivity(intent)
+            } else {
+                context.startActivity(intent)
+            }
+            true
+        } catch (_: Exception) {
+            false
+        }
+    }
+
+    /// Copies the activation code to clipboard and opens the system eSIM management screen.
+    /// Returns true on success, false otherwise.
+    private fun openSettingsFallback(activationCode: String): Boolean {
+        return try {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? android.content.ClipboardManager
+            clipboard?.setPrimaryClip(
+                android.content.ClipData.newPlainText("eSIM Activation Code", activationCode)
+            )
+
+            val intent = Intent(EuiccManager.ACTION_MANAGE_EMBEDDED_SUBSCRIPTIONS)
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+
+            val activity = appContext.currentActivity
+            if (activity != null) {
+                activity.startActivity(intent)
+            } else {
+                context.startActivity(intent)
+            }
+            true
+        } catch (_: Exception) {
+            false
         }
     }
 
