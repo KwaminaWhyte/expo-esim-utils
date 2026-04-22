@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.2.0 (2026-04-22)
+
+### Added
+
+- Android Universal Link fallback for `openEsimSetup` — opens `https://esimsetup.android.com/esim_qrcode_provisioning?carddata=<code>` when `EuiccManager.downloadSubscription()` is unavailable or fails (Android 10+)
+- New `EsimSetupResult` value: `"universal_link_opened"`
+
+### Changed
+
+- Android `openEsimSetup` fallback order: `downloadSubscription` → Universal Link → clipboard + eSIM settings
+
 ## 0.1.3 (2026-03-07)
 
 ### Fixed
