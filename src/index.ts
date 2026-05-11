@@ -8,8 +8,11 @@ export type { CellularPlan, EsimCapability, EsimSetupResult };
 /**
  * Check if the current device supports eSIM.
  *
- * - **iOS**: Uses `CTCellularPlanProvisioning.supportsCellularPlan()`.
- *   No entitlement required — works for any app on iOS 12.0+.
+ * - **iOS**: Tries `CTCellularPlanProvisioning.supportsCellularPlan()` first.
+ *   That API requires Apple's carrier-only commercial eSIM entitlement and
+ *   returns `false` for normal apps even on eSIM-capable iPhones (XS, SE 2020,
+ *   16 Pro, etc.), so we fall back to a hardware-model check (iPhone XS+).
+ *   Works for any app on iOS 12.0+.
  * - **Android**: Uses `EuiccManager.isEnabled()`.
  *   No permission required — works for any app on Android 9 (API 28)+.
  * - **Web**: Always returns `false`.

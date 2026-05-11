@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 (2026-05-11)
+
+### Fixed
+
+- `isEsimSupported()` returning `false` on iOS for eSIM-capable iPhones (XS, SE 2020, 14, 15, 16 Pro, …). `CTCellularPlanProvisioning.supportsCellularPlan()` requires Apple's carrier-only commercial eSIM entitlement and returns `false` for any app without it. Added a hardware-model fallback that treats `iPhone11,*` (XS/XR) and later as eSIM-capable when the CoreTelephony API reports `false`. ([#1](https://github.com/KwaminaWhyte/expo-esim-utils/issues/1))
+- `getEsimCapability()` now includes the iOS `deviceModel` identifier and a clearer `reason` string when capability is detected via the model fallback.
+
 ## 0.2.0 (2026-04-22)
 
 ### Added

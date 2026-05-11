@@ -3,16 +3,66 @@ import CoreTelephony
 import UIKit
 
 public class ExpoEsimUtilsModule: Module {
+    /// Reads the hardware model identifier (e.g. "iPhone12,8" for iPhone SE 2nd gen).
+    /// Returns the simulator's host model when running under Simulator.
+    private static func deviceModelIdentifier() -> String {
+        if let simModel = ProcessInfo.processInfo.environment["SIMULATOR_MODEL_IDENTIFIER"] {
+            return simModel
+        }
+        var sysinfo = utsname()
+        uname(&sysinfo)
+        let machineMirror = Mirror(reflecting: sysinfo.machine)
+        let identifier = machineMirror.children.reduce(into: "") { result, element in
+            guard let value = element.value as? Int8, value != 0 else { return }
+            result.append(String(UnicodeScalar(UInt8(value))))
+        }
+        return identifier
+    }
+
+    /// Heuristic eSIM hardware capability via device model identifier.
+    /// Used as a fallback because `CTCellularPlanProvisioning.supportsCellularPlan()`
+    /// only returns true for apps that hold Apple's carrier-only commercial eSIM
+    /// entitlement — it returns false for every other app even on eSIM-capable iPhones.
+    ///
+    /// eSIM-capable iPhones (Worldwide models — China/HK dual-physical-SIM variants excluded):
+    /// - iPhone XS / XS Max / XR     → iPhone11,*
+    /// - iPhone 11 series, SE 2nd gen → iPhone12,*
+    /// - iPhone 12 series            → iPhone13,*
+    /// - iPhone 13 series, SE 3rd gen, 14/14 Plus → iPhone14,*
+    /// - iPhone 14 Pro/Pro Max, 15 series → iPhone15,*
+    /// - iPhone 15 Pro/Pro Max, 16e   → iPhone16,*
+    /// - iPhone 16 series            → iPhone17,*
+    /// - Future iPhone18,* and later → assume yes
+    private static func modelLikelySupportsEsim(_ model: String) -> Bool {
+        guard model.hasPrefix("iPhone") else { return false }
+        let suffix = model.dropFirst("iPhone".count)
+        guard let commaIdx = suffix.firstIndex(of: ","),
+              let major = Int(suffix[..<commaIdx]) else {
+            return false
+        }
+        return major >= 11
+    }
+
     public func definition() -> ModuleDefinition {
         Name("ExpoEsimUtils")
 
         /// Returns true if the device hardware supports eSIM.
+        ///
+        /// Uses `CTCellularPlanProvisioning.supportsCellularPlan()` first; that API
+        /// requires Apple's carrier-only entitlement and returns false for normal
+        /// apps even on eSIM-capable iPhones. Falls back to a device-model check so
+        /// consumer apps still get an accurate answer.
         Function("isEsimSupported") { () -> Bool in
             guard #available(iOS 12.0, *) else {
                 return false
             }
             let provisioning = CTCellularPlanProvisioning()
-            return provisioning.supportsCellularPlan()
+            if provisioning.supportsCellularPlan() {
+                return true
+            }
+            return ExpoEsimUtilsModule.modelLikelySupportsEsim(
+                ExpoEsimUtilsModule.deviceModelIdentifier()
+            )
         }
 
         /// Returns detailed eSIM capability information.
@@ -28,12 +78,22 @@ public class ExpoEsimUtilsModule: Module {
                 return result
             }
 
+            let model = ExpoEsimUtilsModule.deviceModelIdentifier()
+            result["deviceModel"] = model
+
             let provisioning = CTCellularPlanProvisioning()
-            let supported = provisioning.supportsCellularPlan()
+            let ctSupported = provisioning.supportsCellularPlan()
+            let modelSupported = ExpoEsimUtilsModule.modelLikelySupportsEsim(model)
+            let supported = ctSupported || modelSupported
             result["isSupported"] = supported
-            result["reason"] = supported
-                ? "Device supports eSIM via CoreTelephony"
-                : "Device hardware does not support eSIM"
+
+            if ctSupported {
+                result["reason"] = "Device supports eSIM via CoreTelephony"
+            } else if modelSupported {
+                result["reason"] = "Device model \(model) supports eSIM (CoreTelephony API requires carrier entitlement)"
+            } else {
+                result["reason"] = "Device hardware does not support eSIM"
+            }
 
             let networkInfo = CTTelephonyNetworkInfo()
             if let carriers = networkInfo.serviceSubscriberCellularProviders {

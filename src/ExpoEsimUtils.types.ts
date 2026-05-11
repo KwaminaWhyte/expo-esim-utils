@@ -14,6 +14,8 @@ export type EsimCapability = {
   isSimPortAvailable?: boolean;
   /** Active cellular plans detected on the device */
   activePlans?: CellularPlan[];
+  /** iOS hardware model identifier (e.g. "iPhone12,8"). iOS only. */
+  deviceModel?: string;
 };
 
 /**
