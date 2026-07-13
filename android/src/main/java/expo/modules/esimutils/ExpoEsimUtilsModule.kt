@@ -38,6 +38,7 @@ class ExpoEsimUtilsModule : Module() {
             val result = mutableMapOf<String, Any?>(
                 "platform" to "android",
                 "isSupported" to false,
+                "confidence" to "confirmed",
                 "reason" to "unknown"
             )
 
@@ -55,6 +56,9 @@ class ExpoEsimUtilsModule : Module() {
 
             val isEnabled = euiccManager.isEnabled
             result["isSupported"] = isEnabled
+            // Android has no carrier-entitlement wall like iOS's CoreTelephony —
+            // EuiccManager.isEnabled() is a direct hardware/OS check, so this is
+            // always "confirmed", never a model-based guess.
 
             if (isEnabled) {
                 result["reason"] = "Device supports eSIM via EuiccManager"

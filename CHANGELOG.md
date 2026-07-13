@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.0 (2026-07-13)
+
+### Added
+
+- `getEsimCapability()` now returns a `confidence` field: `'confirmed'` (OS-verified — always on Android, and on iOS when the carrier entitlement is present), `'assumed'` (iOS model heuristic — not OS-verified), or `'unknown'` (iOS iPad only — an unrecognized model identifier, most likely a new device released after this library's last update; `isSupported` defaults to `false` but the device may actually support eSIM). Requested in [#1](https://github.com/KwaminaWhyte/expo-esim-utils/issues/1) as a way to distinguish a real detection from a heuristic guess.
+- iOS: the device-model fallback now reports `'unknown'` instead of silently guessing `false` for iPad identifiers it can't classify (major version `>= 7`, i.e. the eSIM-capable era, but not in the known Cellular allowlist) — these could be an un-catalogued new Cellular iPad or a Wi-Fi-only unit, and there's no way to tell without a library update.
+
+### Changed
+
+- `isEsimSupported()` behavior is unchanged (still a plain boolean, `unknown` conservatively maps to `false`) — this is a non-breaking, additive release.
+
 ## 0.2.2 (2026-07-13)
 
 ### Fixed

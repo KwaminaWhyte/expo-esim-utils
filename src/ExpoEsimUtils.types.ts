@@ -6,6 +6,20 @@ export type EsimCapability = {
   isSupported: boolean;
   /** The platform: 'ios' or 'android' */
   platform: 'ios' | 'android';
+  /**
+   * How confident `isSupported` is:
+   * - `'confirmed'`: verified directly by the OS (CoreTelephony with the
+   *   carrier entitlement, or Android's `EuiccManager` — Android always
+   *   reports `'confirmed'` since it has no entitlement wall).
+   * - `'assumed'`: iOS only. The device model is a known eSIM-capable model,
+   *   but `CTCellularPlanProvisioning` requires Apple's carrier-only
+   *   entitlement to confirm it directly, which this library does not hold.
+   * - `'unknown'`: iOS only, iPad only. The model identifier isn't
+   *   recognized — most likely a new device released after this library's
+   *   last update. `isSupported` conservatively reports `false`, but the
+   *   device may actually support eSIM. Check for a library update.
+   */
+  confidence?: 'confirmed' | 'assumed' | 'unknown';
   /** Human-readable reason for the support status */
   reason: string;
   /** eUICC firmware version (Android only, when available) */

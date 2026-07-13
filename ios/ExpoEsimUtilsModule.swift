@@ -53,6 +53,22 @@ public class ExpoEsimUtilsModule: Module {
         "iPad16,2",
     ]
 
+    /// Confidence level for eSIM support as derived from the device-model
+    /// heuristic (only consulted when CoreTelephony's entitlement-gated API
+    /// can't confirm support directly):
+    /// - `.supported`: recognized eSIM-capable model → reported as "assumed".
+    /// - `.unsupported`: recognized hardware generation that predates eSIM
+    ///   entirely (or, for iPhone, is simply too old) → reported as
+    ///   "confirmed" false — there's no real ambiguity here.
+    /// - `.unknown`: an identifier we can't classify either way — reported
+    ///   as "unknown" rather than silently guessing. This only happens for
+    ///   iPad (see below); every iPhone identifier is classifiable by age.
+    private enum ModelEsimConfidence {
+        case supported
+        case unsupported
+        case unknown
+    }
+
     /// Heuristic eSIM hardware capability via device model identifier.
     /// Used as a fallback because `CTCellularPlanProvisioning.supportsCellularPlan()`
     /// (and its `supportsEmbeddedSIM` sibling — same underlying entitlement gate)
@@ -70,21 +86,48 @@ public class ExpoEsimUtilsModule: Module {
     /// - iPhone 16 series            → iPhone17,*
     /// - Future iPhone18,* and later → assume yes
     ///
-    /// eSIM-capable iPads: see `cellularEsimIPadModels` above — Wi-Fi-only models
-    /// (~75% of iPads sold) never support eSIM since they have no SIM hardware.
-    private static func modelLikelySupportsEsim(_ model: String) -> Bool {
+    /// Every worldwide iPhone ships with both a nano-SIM tray and an eSIM, so
+    /// the major-version number alone is enough to classify *any* identifier,
+    /// past or future — there's no "unknown" case for iPhone.
+    ///
+    /// iPad is different: Wi-Fi and Wi-Fi+Cellular are separate hardware SKUs
+    /// sharing the same "iPadN,*" major-version prefix, and only the Cellular
+    /// SKU has any SIM at all. `cellularEsimIPadModels` above is an explicit
+    /// allowlist of the identifiers we've confirmed. For iPad identifiers with
+    /// major >= 7 (the 2018+, eSIM-era generations) that *aren't* in that list,
+    /// we genuinely can't tell whether it's a Wi-Fi SKU of a known family (no
+    /// SIM hardware — confidently "no") or an uncatalogued new Cellular SKU
+    /// this library hasn't been updated for yet (possibly "yes") — so those
+    /// report as `.unknown` instead of guessing.
+    private static func modelEsimConfidence(_ model: String) -> ModelEsimConfidence {
         if model.hasPrefix("iPhone") {
             let suffix = model.dropFirst("iPhone".count)
             guard let commaIdx = suffix.firstIndex(of: ","),
                   let major = Int(suffix[..<commaIdx]) else {
-                return false
+                return .unknown
             }
-            return major >= 11
+            return major >= 11 ? .supported : .unsupported
         }
         if model.hasPrefix("iPad") {
-            return cellularEsimIPadModels.contains(model)
+            if cellularEsimIPadModels.contains(model) {
+                return .supported
+            }
+            let suffix = model.dropFirst("iPad".count)
+            guard let commaIdx = suffix.firstIndex(of: ","),
+                  let major = Int(suffix[..<commaIdx]) else {
+                return .unknown
+            }
+            return major >= 7 ? .unknown : .unsupported
         }
-        return false
+        return .unsupported
+    }
+
+    /// Boolean projection of `modelEsimConfidence` for `isEsimSupported()`,
+    /// which only reports true/false. `.unknown` conservatively maps to
+    /// `false` here — use `getEsimCapability().confidence` if you need to
+    /// distinguish "confirmed unsupported" from "not yet classified".
+    private static func modelLikelySupportsEsim(_ model: String) -> Bool {
+        modelEsimConfidence(model) == .supported
     }
 
     public func definition() -> ModuleDefinition {
@@ -128,16 +171,26 @@ public class ExpoEsimUtilsModule: Module {
 
             let provisioning = CTCellularPlanProvisioning()
             let ctSupported = provisioning.supportsCellularPlan()
-            let modelSupported = ExpoEsimUtilsModule.modelLikelySupportsEsim(model)
-            let supported = ctSupported || modelSupported
-            result["isSupported"] = supported
 
             if ctSupported {
+                result["isSupported"] = true
+                result["confidence"] = "confirmed"
                 result["reason"] = "Device supports eSIM via CoreTelephony"
-            } else if modelSupported {
-                result["reason"] = "Device model \(model) supports eSIM (CoreTelephony API requires carrier entitlement)"
             } else {
-                result["reason"] = "Device hardware does not support eSIM"
+                switch ExpoEsimUtilsModule.modelEsimConfidence(model) {
+                case .supported:
+                    result["isSupported"] = true
+                    result["confidence"] = "assumed"
+                    result["reason"] = "Device model \(model) supports eSIM (CoreTelephony API requires carrier entitlement)"
+                case .unsupported:
+                    result["isSupported"] = false
+                    result["confidence"] = "confirmed"
+                    result["reason"] = "Device hardware does not support eSIM"
+                case .unknown:
+                    result["isSupported"] = false
+                    result["confidence"] = "unknown"
+                    result["reason"] = "Device model \(model) is not recognized by this version of the library — it may be a new device released after the last update. It could support eSIM even though isSupported reports false; check for a library update."
+                }
             }
 
             let networkInfo = CTTelephonyNetworkInfo()

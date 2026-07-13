@@ -89,11 +89,14 @@ import { getEsimCapability } from 'expo-esim-utils';
 
 const capability = getEsimCapability();
 console.log(capability.isSupported); // true
+console.log(capability.confidence);  // "confirmed" | "assumed" | "unknown"
 console.log(capability.reason);      // "Device supports eSIM via CoreTelephony"
 console.log(capability.activePlans); // [{ slot: "0", carrierName: "T-Mobile", ... }]
 ```
 
 **Returns**: [`EsimCapability`](#esimcapability)
+
+> **Confidence**: `isSupported` is a best-effort boolean. On iOS, `CTCellularPlanProvisioning.supportsCellularPlan()` requires Apple's carrier-only entitlement, which most apps (resellers/MVNOs) don't have — so this library falls back to a device-model check. `confidence` tells you which path produced the answer: `"confirmed"` (OS-verified — always true on Android, and on iOS when the entitlement is present), `"assumed"` (iOS model heuristic — very likely correct but not OS-verified), or `"unknown"` (iOS iPad only — an unrecognized model, most likely a new device released after this library's last update; `isSupported` defaults to `false` here but the device may actually support eSIM).
 
 ---
 
@@ -170,6 +173,7 @@ switch (result) {
 type EsimCapability = {
   isSupported: boolean;
   platform: 'ios' | 'android';
+  confidence?: 'confirmed' | 'assumed' | 'unknown';
   reason: string;
   osVersion?: string;            // Android: eUICC firmware version
   isSimPortAvailable?: boolean;  // Android 13+: whether a SIM port is free
