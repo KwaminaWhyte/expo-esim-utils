@@ -19,10 +19,46 @@ public class ExpoEsimUtilsModule: Module {
         return identifier
     }
 
+    /// Cellular-variant iPad model identifiers known to support eSIM, per Apple's
+    /// official device list (https://support.apple.com/en-us/119592).
+    ///
+    /// Unlike iPhone — where every worldwide unit of a given generation ships with
+    /// both a nano-SIM tray and an eSIM — iPad Wi-Fi and Wi-Fi+Cellular are
+    /// different hardware SKUs with different model identifiers, and *only* the
+    /// Cellular SKU has any SIM (physical or embedded) at all. That means this
+    /// can't be expressed as a "major version and later" cutoff the way the
+    /// iPhone list below is; it has to be an explicit allowlist of the Cellular
+    /// identifiers. Wi-Fi-only identifiers correctly fall through to `false`
+    /// because those units have no SIM hardware whatsoever.
+    ///
+    /// Update this set when Apple ships new Cellular iPad models.
+    private static let cellularEsimIPadModels: Set<String> = [
+        // iPad Pro 11" (1st–4th gen, 2018–2022)
+        "iPad8,3", "iPad8,4", "iPad8,10", "iPad13,5", "iPad13,7", "iPad14,4",
+        // iPad Pro 12.9" (3rd–6th gen, 2018–2022)
+        "iPad8,7", "iPad8,8", "iPad8,12", "iPad13,9", "iPad13,11", "iPad14,6",
+        // iPad Pro 11" / 13" (M4 and later)
+        "iPad16,4", "iPad16,6",
+        // iPad Air (3rd–5th gen, 2019–2022)
+        "iPad11,4", "iPad13,2", "iPad13,17",
+        // iPad Air 11" / 13" (M2 and later)
+        "iPad14,9", "iPad14,11", "iPad15,4", "iPad15,6",
+        // iPad (7th–10th gen, 2019–2022)
+        "iPad7,12", "iPad11,7", "iPad12,2", "iPad13,19",
+        // iPad (A16 and later)
+        "iPad15,8",
+        // iPad mini (5th–6th gen, 2019–2021)
+        "iPad11,2", "iPad14,2",
+        // iPad mini (A17 Pro and later)
+        "iPad16,2",
+    ]
+
     /// Heuristic eSIM hardware capability via device model identifier.
     /// Used as a fallback because `CTCellularPlanProvisioning.supportsCellularPlan()`
+    /// (and its `supportsEmbeddedSIM` sibling — same underlying entitlement gate)
     /// only returns true for apps that hold Apple's carrier-only commercial eSIM
-    /// entitlement — it returns false for every other app even on eSIM-capable iPhones.
+    /// entitlement — both return false for every other app even on eSIM-capable
+    /// hardware.
     ///
     /// eSIM-capable iPhones (Worldwide models — China/HK dual-physical-SIM variants excluded):
     /// - iPhone XS / XS Max / XR     → iPhone11,*
@@ -33,14 +69,22 @@ public class ExpoEsimUtilsModule: Module {
     /// - iPhone 15 Pro/Pro Max, 16e   → iPhone16,*
     /// - iPhone 16 series            → iPhone17,*
     /// - Future iPhone18,* and later → assume yes
+    ///
+    /// eSIM-capable iPads: see `cellularEsimIPadModels` above — Wi-Fi-only models
+    /// (~75% of iPads sold) never support eSIM since they have no SIM hardware.
     private static func modelLikelySupportsEsim(_ model: String) -> Bool {
-        guard model.hasPrefix("iPhone") else { return false }
-        let suffix = model.dropFirst("iPhone".count)
-        guard let commaIdx = suffix.firstIndex(of: ","),
-              let major = Int(suffix[..<commaIdx]) else {
-            return false
+        if model.hasPrefix("iPhone") {
+            let suffix = model.dropFirst("iPhone".count)
+            guard let commaIdx = suffix.firstIndex(of: ","),
+                  let major = Int(suffix[..<commaIdx]) else {
+                return false
+            }
+            return major >= 11
         }
-        return major >= 11
+        if model.hasPrefix("iPad") {
+            return cellularEsimIPadModels.contains(model)
+        }
+        return false
     }
 
     public func definition() -> ModuleDefinition {
@@ -50,8 +94,9 @@ public class ExpoEsimUtilsModule: Module {
         ///
         /// Uses `CTCellularPlanProvisioning.supportsCellularPlan()` first; that API
         /// requires Apple's carrier-only entitlement and returns false for normal
-        /// apps even on eSIM-capable iPhones. Falls back to a device-model check so
-        /// consumer apps still get an accurate answer.
+        /// apps even on eSIM-capable iPhones and iPads. Falls back to a device-model
+        /// check (iPhone version cutoff, iPad Cellular-SKU allowlist) so consumer
+        /// apps still get an accurate answer.
         Function("isEsimSupported") { () -> Bool in
             guard #available(iOS 12.0, *) else {
                 return false

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.2 (2026-07-13)
+
+### Fixed
+
+- `isEsimSupported()` / `getEsimCapability()` returning `false` on eSIM-capable iPad Cellular models (Air, mini, Pro, and base iPad). The 0.2.1 model-fallback only recognized `iPhone*` identifiers. iPad Wi-Fi and Wi-Fi+Cellular are different hardware SKUs with different model identifiers (unlike iPhone, where every unit ships with both nano-SIM and eSIM), so the fallback now checks the Cellular identifier against an explicit allowlist built from Apple's official eSIM-capable device list instead of a version cutoff. ([#1](https://github.com/KwaminaWhyte/expo-esim-utils/issues/1))
+- Confirmed `CTCellularPlanProvisioning.supportsEmbeddedSIM` is gated behind the same carrier-only entitlement as `supportsCellularPlan()` and returns `false` for non-carrier apps on real hardware — so it isn't a viable alternative detection path either, on iPhone or iPad.
+
 ## 0.2.1 (2026-05-11)
 
 ### Fixed
