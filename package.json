@@ -47,5 +47,10 @@
   "devDependencies": {
     "expo-module-scripts": "^4.0.0",
     "expo-modules-core": "^2.0.0"
+  },
+  "overrides": {
+    "brace-expansion@1": "^1.1.18",
+    "ws@8": "^8.21.3",
+    "uuid": "^11.1.1"
   }
 }
