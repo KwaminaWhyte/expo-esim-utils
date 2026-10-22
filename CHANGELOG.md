@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1 (2026-10-22)
+
+### Fixed
+
+- Import `requireNativeModule` from `expo` instead of `expo-modules-core`. Expo SDK 58 no longer hoists `expo-modules-core` for dependents, so the old import failed to resolve in apps that do not depend on it directly.
+
 ## 0.3.0 (2026-07-13)
 
 ### Added
