@@ -56,6 +56,47 @@ export type EsimSetupResult =
   | 'unsupported';
 
 /**
+ * Outcome of `installEsim()`.
+ *
+ * - `success`: the profile is installed. Android only; the OS confirmed it.
+ * - `failed`: the install did not complete. When `consentShown` is true the
+ *   user saw the system dialog first, so this is either the user cancelling or
+ *   a real download failure; the codes below say which.
+ * - `timeout`: the system never reported a result (Android). Treat as unknown.
+ * - `universal_link_opened` / `settings_opened`: the direct install was not
+ *   available and a system install screen was opened instead; the user finishes
+ *   there and the app is not told the result.
+ * - `unsupported`: no in-app install on this device or OS version.
+ */
+export type EsimInstallStatus =
+  | 'success'
+  | 'failed'
+  | 'timeout'
+  | 'universal_link_opened'
+  | 'settings_opened'
+  | 'unsupported';
+
+export type EsimInstallResult = {
+  status: EsimInstallStatus;
+  /** Whether the system consent dialog was shown before the result (Android). */
+  consentShown: boolean;
+  /** Why the library gave up or fell back, when it was the library's decision. */
+  reason?: string;
+  /** `EuiccManager` result code of the final callback (Android). */
+  resultCode?: number;
+  /** `EXTRA_EMBEDDED_SUBSCRIPTION_DETAILED_CODE` (Android). */
+  detailedCode?: number;
+  /** `EXTRA_EMBEDDED_SUBSCRIPTION_OPERATION_CODE` (Android 11+). */
+  operationCode?: number;
+  /** `EXTRA_EMBEDDED_SUBSCRIPTION_ERROR_CODE` (Android 11+). */
+  errorCode?: number;
+  /** SM-DP+ subject code, e.g. "8.1.1" (Android 11+). */
+  smdxSubjectCode?: string;
+  /** SM-DP+ reason code, e.g. "3.8" (Android 11+). */
+  smdxReasonCode?: string;
+};
+
+/**
  * Information about an active cellular plan on the device.
  */
 export type CellularPlan = {

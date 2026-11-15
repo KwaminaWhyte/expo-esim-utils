@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0 (2026-11-15)
+
+### Added
+
+- `installEsim(activationCode)`: installs a profile and resolves with what actually happened. On Android it keeps listening after the system consent dialog, so the result is `success` or `failed` rather than `settings_opened`, and a failure carries Android's `resultCode`, `detailedCode`, `operationCode`, `errorCode` and the SM-DP+ subject and reason codes. Resolves `timeout` if the system reports nothing within four minutes. On iOS it opens Apple's install flow and resolves `settings_opened`, as before.
+
+### Fixed
+
+- Android: `openEsimSetup()` stopped listening after the first callback. When the system asked the user to confirm the download, the final result was delivered to a receiver that had already been unregistered, so the app could never learn whether the install succeeded. `openEsimSetup()` keeps its old return values for compatibility; use `installEsim()` to get the outcome.
+- Android: the activation code was passed to `DownloadableSubscription.forActivationCode()` with its `LPA:` scheme. `EuiccManager` expects the bare SGP.22 activation code (`1$<smdp>$<matching id>`), and phones differ on whether they tolerate the scheme. The scheme is now removed for the direct download and always present on the `esimsetup.android.com` link, whichever form the caller passes.
+
 ## 0.3.1 (2026-10-22)
 
 ### Fixed

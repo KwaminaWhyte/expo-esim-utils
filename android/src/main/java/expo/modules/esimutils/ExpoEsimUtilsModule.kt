@@ -7,6 +7,8 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.net.Uri
 import android.os.Build
+import android.os.Handler
+import android.os.Looper
 import android.telephony.SubscriptionManager
 import android.telephony.euicc.DownloadableSubscription
 import android.telephony.euicc.EuiccInfo
@@ -19,6 +21,13 @@ class ExpoEsimUtilsModule : Module() {
 
     companion object {
         private const val ACTION_DOWNLOAD_SUBSCRIPTION = "expo.modules.esimutils.DOWNLOAD_SUBSCRIPTION"
+
+        /// How long installEsim waits for the system to report a final result.
+        private const val INSTALL_TIMEOUT_MS = 4 * 60 * 1000L
+
+        /// A download can need more than one confirmation (consent, then a
+        /// confirmation code). More than this is a loop, not a flow.
+        private const val MAX_RESOLUTIONS = 3
     }
 
     override fun definition() = ModuleDefinition {
@@ -145,7 +154,7 @@ class ExpoEsimUtilsModule : Module() {
 
             // Try downloadSubscription for direct in-app install
             try {
-                val subscription = DownloadableSubscription.forActivationCode(activationCode)
+                val subscription = DownloadableSubscription.forActivationCode(bareActivationCode(activationCode))
 
                 val callbackIntent = Intent(ACTION_DOWNLOAD_SUBSCRIPTION).apply {
                     setPackage(context.packageName)
@@ -231,6 +240,181 @@ class ExpoEsimUtilsModule : Module() {
                 promise.resolve("fail")
             }
         }
+
+        /// Downloads and installs an eSIM profile and reports what actually happened.
+        ///
+        /// Unlike openEsimSetup, this keeps listening after the system shows its
+        /// consent dialog, so the promise resolves with the real outcome
+        /// (installed, failed, or timed out) rather than "settings_opened".
+        /// Failures carry Android's result and error codes so the caller can tell
+        /// a full eUICC from a carrier lock from a network error.
+        ///
+        /// Resolves a map: status ("success" | "failed" | "timeout" |
+        /// "universal_link_opened" | "settings_opened" | "unsupported"),
+        /// consentShown, and when Android supplied them resultCode, detailedCode,
+        /// operationCode, errorCode, smdxSubjectCode, smdxReasonCode.
+        AsyncFunction("installEsim") { activationCode: String?, promise: Promise ->
+            if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) {
+                promise.resolve(mapOf("status" to "unsupported", "consentShown" to false))
+                return@AsyncFunction
+            }
+
+            val euiccManager = context.getSystemService(Context.EUICC_SERVICE) as? EuiccManager
+            if (euiccManager == null || !euiccManager.isEnabled) {
+                promise.resolve(mapOf("status" to "unsupported", "consentShown" to false))
+                return@AsyncFunction
+            }
+
+            if (activationCode.isNullOrBlank()) {
+                promise.resolve(mapOf("status" to "failed", "consentShown" to false, "reason" to "no_activation_code"))
+                return@AsyncFunction
+            }
+
+            val handler = Handler(Looper.getMainLooper())
+            var settled = false
+            var resolutions = 0
+            var receiver: BroadcastReceiver? = null
+
+            fun finish(status: String, code: Int?, intent: Intent?, reason: String? = null) {
+                if (settled) return
+                settled = true
+                handler.removeCallbacksAndMessages(null)
+                receiver?.let {
+                    try {
+                        context.unregisterReceiver(it)
+                    } catch (_: Exception) {
+                    }
+                }
+                promise.resolve(installResult(status, code, intent, resolutions > 0, reason))
+            }
+
+            /// Nothing was shown to the user yet: hand over to a system install screen.
+            fun fallBack(code: Int?, intent: Intent?, reason: String) {
+                when {
+                    tryOpenUniversalLink(activationCode) -> finish("universal_link_opened", code, intent, reason)
+                    openSettingsFallback(activationCode) -> finish("settings_opened", code, intent, reason)
+                    else -> finish("failed", code, intent, reason)
+                }
+            }
+
+            try {
+                // Unique per attempt, so a late callback from an earlier attempt
+                // can never settle this one.
+                val action = "$ACTION_DOWNLOAD_SUBSCRIPTION.${System.nanoTime()}"
+                val callbackIntent = Intent(action).apply { setPackage(context.packageName) }
+                val pendingIntent = PendingIntent.getBroadcast(
+                    context,
+                    0,
+                    callbackIntent,
+                    PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_MUTABLE
+                )
+
+                receiver = object : BroadcastReceiver() {
+                    override fun onReceive(ctx: Context?, intent: Intent?) {
+                        val code = resultCode
+                        when (code) {
+                            EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_OK -> finish("success", code, intent)
+
+                            EuiccManager.EMBEDDED_SUBSCRIPTION_RESULT_RESOLVABLE_ERROR -> {
+                                // The system needs the user (consent, or a
+                                // confirmation code). Show its dialog and KEEP
+                                // listening: it reports the final result to this
+                                // same PendingIntent when the user is done.
+                                val activity = appContext.currentActivity
+                                if (activity == null || intent == null) {
+                                    fallBack(code, intent, "no_activity_for_resolution")
+                                    return
+                                }
+                                if (resolutions >= MAX_RESOLUTIONS) {
+                                    finish("failed", code, intent, "too_many_resolutions")
+                                    return
+                                }
+                                try {
+                                    euiccManager.startResolutionActivity(activity, 0, intent, pendingIntent)
+                                    resolutions++
+                                } catch (_: Exception) {
+                                    if (resolutions > 0) {
+                                        finish("failed", code, intent, "resolution_failed")
+                                    } else {
+                                        fallBack(code, intent, "resolution_unavailable")
+                                    }
+                                }
+                            }
+
+                            else -> {
+                                // After the system dialog this is the user
+                                // cancelling or a real download failure; either way
+                                // they have already been through one install
+                                // screen, so do not open another.
+                                if (resolutions > 0) {
+                                    finish("failed", code, intent)
+                                } else {
+                                    fallBack(code, intent, "download_error")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                    context.registerReceiver(receiver, IntentFilter(action), Context.RECEIVER_NOT_EXPORTED)
+                } else {
+                    context.registerReceiver(receiver, IntentFilter(action))
+                }
+
+                handler.postDelayed({ finish("timeout", null, null) }, INSTALL_TIMEOUT_MS)
+
+                val subscription = DownloadableSubscription.forActivationCode(bareActivationCode(activationCode))
+                euiccManager.downloadSubscription(subscription, true, pendingIntent)
+            } catch (_: Exception) {
+                fallBack(null, null, "download_threw")
+            }
+        }
+    }
+
+    /// The SGP.22 activation code without the "LPA:" URI scheme.
+    ///
+    /// A QR code carries "LPA:1$<smdp>$<matching id>". EuiccManager wants only
+    /// the activation code ("1$<smdp>$<matching id>"); whether a phone's LPA
+    /// tolerates the scheme in front differs by manufacturer.
+    private fun bareActivationCode(raw: String): String {
+        val trimmed = raw.trim()
+        return if (trimmed.startsWith("LPA:", ignoreCase = true)) trimmed.substring(4) else trimmed
+    }
+
+    /// The result installEsim resolves with, including whatever error detail
+    /// Android attached to the callback.
+    private fun installResult(
+        status: String,
+        resultCode: Int?,
+        intent: Intent?,
+        consentShown: Boolean,
+        reason: String?
+    ): Map<String, Any?> {
+        val result = mutableMapOf<String, Any?>("status" to status, "consentShown" to consentShown)
+        resultCode?.let { result["resultCode"] = it }
+        reason?.let { result["reason"] = it }
+        if (intent != null) {
+            if (intent.hasExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_DETAILED_CODE)) {
+                result["detailedCode"] =
+                    intent.getIntExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_DETAILED_CODE, 0)
+            }
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                if (intent.hasExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_OPERATION_CODE)) {
+                    result["operationCode"] =
+                        intent.getIntExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_OPERATION_CODE, 0)
+                }
+                if (intent.hasExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_ERROR_CODE)) {
+                    result["errorCode"] =
+                        intent.getIntExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_ERROR_CODE, 0)
+                }
+                intent.getStringExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_SMDX_SUBJECT_CODE)
+                    ?.let { result["smdxSubjectCode"] = it }
+                intent.getStringExtra(EuiccManager.EXTRA_EMBEDDED_SUBSCRIPTION_SMDX_REASON_CODE)
+                    ?.let { result["smdxReasonCode"] = it }
+            }
+        }
+        return result
     }
 
     /// Attempts to launch the Android Universal Link for eSIM install.
@@ -241,7 +425,7 @@ class ExpoEsimUtilsModule : Module() {
             return false
         }
         return try {
-            val encoded = Uri.encode(activationCode)
+            val encoded = Uri.encode("LPA:" + bareActivationCode(activationCode))
             val uri = Uri.parse("https://esimsetup.android.com/esim_qrcode_provisioning?carddata=$encoded")
             val intent = Intent(Intent.ACTION_VIEW, uri).apply {
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)

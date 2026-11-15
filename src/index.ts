@@ -1,9 +1,15 @@
 import { Platform } from 'react-native';
 
 import ExpoEsimUtilsModule from './ExpoEsimUtilsModule';
-import type { CellularPlan, EsimCapability, EsimSetupResult } from './ExpoEsimUtils.types';
+import type {
+  CellularPlan,
+  EsimCapability,
+  EsimInstallResult,
+  EsimInstallStatus,
+  EsimSetupResult,
+} from './ExpoEsimUtils.types';
 
-export type { CellularPlan, EsimCapability, EsimSetupResult };
+export type { CellularPlan, EsimCapability, EsimInstallResult, EsimInstallStatus, EsimSetupResult };
 
 /**
  * Check if the current device supports eSIM.
@@ -120,4 +126,43 @@ export async function openEsimSetup(activationCode?: string): Promise<EsimSetupR
     return 'fail';
   }
   return ExpoEsimUtilsModule.openEsimSetup(activationCode ?? null);
+}
+
+/**
+ * Install an eSIM profile and learn what actually happened.
+ *
+ * Prefer this over `openEsimSetup()`. On Android it keeps listening after the
+ * system consent dialog, so it resolves with the real outcome (`success` or
+ * `failed`, with Android's error codes) instead of `settings_opened`.
+ *
+ * - **Android**: `EuiccManager.downloadSubscription()`. Resolves when the OS
+ *   reports the final result, which can be a minute or more after the call
+ *   while the user reads the dialog and the profile downloads.
+ * - **iOS**: opens Apple's install flow (iOS 17.4+) and resolves
+ *   `settings_opened`; iOS never tells an app the result.
+ *
+ * The activation code may be given with or without the `LPA:` prefix.
+ *
+ * @example
+ * ```ts
+ * const result = await installEsim('LPA:1$smdp.example.com$MATCHING-ID');
+ * if (result.status === 'success') {
+ *   // installed
+ * } else if (result.status === 'failed') {
+ *   console.log(result.errorCode, result.smdxReasonCode);
+ * }
+ * ```
+ */
+export async function installEsim(activationCode?: string): Promise<EsimInstallResult> {
+  if (Platform.OS !== 'ios' && Platform.OS !== 'android') {
+    return { status: 'unsupported', consentShown: false };
+  }
+  if (typeof ExpoEsimUtilsModule.installEsim === 'function') {
+    return ExpoEsimUtilsModule.installEsim(activationCode ?? null);
+  }
+  // iOS, or a native binary built before 0.4.0: same flow, coarser answer.
+  const legacy = await ExpoEsimUtilsModule.openEsimSetup(activationCode ?? null);
+  const status: EsimInstallStatus =
+    legacy === 'fail' || legacy === 'unknown' ? 'failed' : legacy;
+  return { status, consentShown: false };
 }
